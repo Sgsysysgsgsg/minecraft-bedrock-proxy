@@ -71,7 +71,7 @@ CLIENT                    BEDROCKBRIDGE               REMOTE SERVER
 Requirements: Java 17+, Gradle
 
 ```bash
-git clone https://github.com/yourname/BedrockBridge
+git clone https://github.com/Sgsysysgsgsg/BedrockBridge
 cd BedrockBridge
 ./gradlew build
 ```
