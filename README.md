@@ -1,118 +1,152 @@
-# BedrockProxy 🎮
+# BedrockBridge
 
-A lightweight LAN proxy that lets PS5, Xbox, and mobile players join **external Bedrock Edition servers** by making them appear as a LAN game.
-
----
-
-## How It Works
+**A Bedrock-to-Bedrock proxy — like Geyser, but for Bedrock clients joining Bedrock servers.**
 
 ```
-PS5 / Xbox / Mobile
-       │
-       │  (sees as LAN game)
-       ▼
- [BedrockProxy] ← running on your PC/laptop
-       │
-       │  (forwards all traffic)
-       ▼
- External Bedrock Server (anywhere on internet)
+[Bedrock Client] ──RakNet/UDP──► [BedrockBridge] ──RakNet/UDP──► [Bedrock Server]
+                                        │
+                                 LAN Broadcast
+                                 (shows up as
+                                  a LAN world)
 ```
 
 ---
 
-## Requirements
+## What it does
 
-- A **PC or laptop** on the same Wi-Fi as your PS5/Xbox
-- **Java 11 or newer** installed → https://adoptium.net
-- The PC and PS5 must be on the **same network/router**
+Geyser lets **Bedrock clients join Java servers**.  
+BedrockBridge lets **Bedrock clients connect to a remote Bedrock server via LAN discovery** — just like in the screenshot where "Another Geyser server" appears as a LAN world.
 
----
-
-## Quick Start
-
-### Step 1 – Edit `config.properties`
-
-Open `config.properties` in Notepad and set your server:
-
-```properties
-server.host=play.yourserver.com
-server.port=19132
-server.name=My Server
-```
-
-### Step 2 – Run the proxy
-
-**Windows:** Double-click `start.bat`
-
-**Mac/Linux:** 
-```bash
-chmod +x start.sh
-./start.sh
-```
-
-**Or manually:**
-```bash
-java -jar BedrockProxy.jar
-```
-
-### Step 3 – Join on PS5/Xbox
-
-1. Open Minecraft on your PS5/Xbox
-2. Go to **Play → Friends tab**
-3. Look under **"LAN Games"**
-4. Your server will appear — tap it to join!
+### Features
+- 🔁 **Transparent proxy** — forwards all Bedrock packets between client and server
+- 📡 **LAN broadcaster** — the proxy appears in your Worlds tab as a LAN world automatically
+- ⚙️ **Simple YAML config** — point it at any Bedrock server (BDS, Nukkit, PocketMine, etc.)
+- 🏗️ **Geyser-style architecture** — easy to extend with packet interception
 
 ---
 
-## Command Line Usage
+## Architecture
 
-You can also pass server details directly without editing the config:
-
-```bash
-java -jar BedrockProxy.jar <server-ip> <server-port>
-# Example:
-java -jar BedrockProxy.jar play.hypixel.net 19132
+```
+src/main/java/dev/bedrockbridge/
+├── bootstrap/
+│   └── BedrockBridgeMain.java        # Entry point
+├── proxy/
+│   └── BedrockBridge.java            # Core orchestrator (like Geyser.java)
+├── config/
+│   └── BedrockBridgeConfig.java      # Loads config.yml
+├── session/
+│   └── ProxySession.java             # One per connected client
+│                                       ties upstream + downstream together
+├── network/
+│   ├── upstream/
+│   │   └── UpstreamPacketHandler.java  # Handles packets FROM the client
+│   └── downstream/
+│       └── DownstreamPacketHandler.java # Handles packets FROM the server
+└── lan/
+    └── LanBroadcaster.java             # UDP broadcast so clients see us as LAN
 ```
 
-Or with a custom name:
-```bash
-java -jar BedrockProxy.jar play.hypixel.net 19132 19132 "Hypixel Server"
+### Packet flow
+
+```
+CLIENT                    BEDROCKBRIDGE               REMOTE SERVER
+  │                            │                            │
+  │── RequestNetworkSettings ─►│                            │
+  │◄─ NetworkSettingsPacket ───│                            │
+  │── LoginPacket ────────────►│── LoginPacket ────────────►│
+  │                            │◄─ ServerToClientHandshake ─│
+  │◄─ ServerToClientHandshake ─│── ClientToServerHandshake ►│
+  │                            │◄─ PlayStatus(LOGIN_SUCCESS)─│
+  │◄─ PlayStatus ──────────────│                            │
+  │         [PASSTHROUGH MODE]                              │
+  │── AnyPacket ──────────────►│── AnyPacket ──────────────►│
+  │◄─ AnyPacket ───────────────│◄─ AnyPacket ───────────────│
 ```
 
 ---
 
-## Building from Source
+## Building
 
-Requires Maven and Java 11+:
+Requirements: Java 17+, Gradle
 
 ```bash
-mvn clean package
-# Output: target/BedrockProxy.jar
+git clone https://github.com/yourname/BedrockBridge
+cd BedrockBridge
+./gradlew build
+```
+
+Output: `build/libs/BedrockBridge.jar`
+
+---
+
+## Running
+
+```bash
+java -jar BedrockBridge.jar
+```
+
+On first run, a `config.yml` is generated. Edit it to point at your server:
+
+```yaml
+proxy:
+  bind-address: "0.0.0.0"
+  port: 19150           # Port clients connect to (must be different from 19132 if server is local)
+
+remote:
+  address: "your.server.ip"
+  port: 19132           # Your Bedrock server's port
+
+lan:
+  enabled: true
+  motd: "My Server"     # Name shown in the Worlds tab
+  sub-motd: "Join us!"
+  broadcast-interval-ms: 1500
+
+max-players: 20
 ```
 
 ---
 
-## Troubleshooting
+## Libraries used
 
-**PS5 doesn't see the server:**
-- Make sure your PC and PS5 are on the **same Wi-Fi network**
-- Check Windows Firewall — allow Java through the firewall
-- Try disabling your firewall temporarily to test
-- Make sure port **19132 UDP** is not already in use
-
-**Can't connect after seeing it:**
-- Verify the remote server IP and port in `config.properties`
-- Make sure the remote server is actually online
-- Some servers require a specific version — check the server's requirements
-
-**Port already in use error:**
-- Another Minecraft server or proxy is using port 19132
-- Close it, or change `local.port` in config.properties to 19133
+| Library | Purpose |
+|---|---|
+| [CloudburstMC/Protocol](https://github.com/CloudburstMC/Protocol) | Bedrock protocol encode/decode (same as Geyser) |
+| [CloudburstMC/Network](https://github.com/CloudburstMC/Network) | RakNet transport (Bedrock uses RakNet over UDP) |
+| [Netty](https://netty.io/) | Async networking |
+| [SnakeYAML](https://github.com/snakeyaml/snakeyaml) | Config file parsing |
+| [Logback](https://logback.qos.ch/) | Logging |
+| [Lombok](https://projectlombok.org/) | Boilerplate reduction |
 
 ---
 
-## Notes
+## Extending BedrockBridge
 
-- Keep the proxy running while you play — closing it will disconnect you
-- The proxy PC doesn't need to be powerful, any old laptop works
-- Works with PS5, Xbox One/Series, Nintendo Switch, iOS, and Android
+### Intercepting packets
+
+To inspect or modify packets mid-flight, override the specific packet handler in `UpstreamPacketHandler` or `DownstreamPacketHandler`:
+
+```java
+// Example: log every chat message the client sends
+@Override
+public PacketSignal handle(TextPacket packet) {
+    LOGGER.info("Chat: {}", packet.getMessage());
+    session.sendDownstream(packet); // still forward it
+    return PacketSignal.HANDLED;
+}
+```
+
+### Adding a plugin API (future)
+
+A `PacketInterceptor` interface can be added so plugins can hook into the pipeline without modifying core classes — similar to how Geyser extensions work.
+
+---
+
+## Roadmap
+
+- [ ] Encryption support (online-mode servers)
+- [ ] Multi-server support (connect different players to different backends)
+- [ ] Plugin/extension API
+- [ ] Web dashboard for monitoring sessions
+- [ ] Docker image
